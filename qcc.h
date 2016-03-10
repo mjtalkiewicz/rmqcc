@@ -63,7 +63,7 @@ extern int MAX_CONSTANTS;
 #define MAXCONSTANTPARAMLENGTH 32
 #define MAXCONSTANTPARAMS 32
 
-typedef enum {QCF_STANDARD, QCF_HEXEN2, QCF_DARKPLACES, QCF_FTE, QCF_FTEDEBUG, QCF_KK7, QCF_QTEST} qcc_targetformat_t;
+typedef enum {QCF_STANDARD, QCF_HEXEN2, QCF_DARKPLACES, QCF_FTE, QCF_FTEDEBUG, QCF_KK7, QCF_QTEST, QCF_DPRM} qcc_targetformat_t;
 extern qcc_targetformat_t qcc_targetformat;
 
 
@@ -322,6 +322,8 @@ typedef struct temp_s {
 } temp_t;
 void QCC_PurgeTemps(void);
 
+typedef struct QCC_usingdef_s;
+
 //not written
 typedef struct QCC_def_s
 {
@@ -346,11 +348,21 @@ typedef struct QCC_def_s
 	pbool saved;
 	pbool isstatic;
 	pbool subscoped_away;
+    pbool oldstyle;
 
 	temp_t *temp;
 
     int anonfuncs;
+    int tempvec_reusable;
+
+    struct QCC_usingdef_s *usingstack;
 } QCC_def_t;
+
+typedef struct QCC_usingdef_s {
+    QCC_def_t *src;
+    QCC_def_t *dest;
+    struct QCC_usingdef_s *next;
+} QCC_usingdef_t;
 
 //============================================================================
 
@@ -375,7 +387,7 @@ typedef union QCC_eval_s
 const extern	unsigned int		type_size[];
 //extern	QCC_def_t	*def_for_type[9];
 
-extern	QCC_type_t	*type_void, *type_string, *type_float, *type_vector, *type_entity, *type_field, *type_function, *type_pointer, *type_integer, *type_variant, *type_floatfield;
+extern	QCC_type_t	*type_void, *type_string, *type_float, *type_vector, *type_entity, *type_field, *type_function, *type_pointer, *type_integer, *type_variant, *type_undefined, *type_null, *type_floatfield;
 
 struct QCC_function_s
 {
@@ -471,7 +483,8 @@ extern pbool keyword_noref;	//nowhere else references this, don't strip it.
 extern pbool keyword_nosave;	//don't write the def to the output.
 extern pbool keyword_union;	//you surly know what a union is!
 extern pbool keyword_inline; //no this is not like in C, used for "anonymous" functions
-
+extern pbool keyword_using;
+extern pbool keyword_operator;
 
 extern pbool keywords_coexist;
 extern pbool output_parms;
@@ -479,7 +492,6 @@ extern pbool autoprototype;
 extern pbool pr_subscopedlocals;
 extern pbool flag_ifstring;
 extern pbool flag_iffloat;
-extern pbool flag_acc;
 extern pbool flag_caseinsensative;
 extern pbool flag_laxcasts;
 extern pbool flag_hashonly;
@@ -539,12 +551,12 @@ void QCC_PR_Lex (void);
 // reads the next token into pr_token and classifies its type
 
 QCC_type_t *QCC_PR_NewType (char *name, int basictype);
+QCC_type_t *QCC_PR_TypeFromBasicType(etype_t basictype);
 QCC_type_t *QCC_PointerTypeTo(QCC_type_t *type);
 QCC_type_t *QCC_PR_ParseType (int newtype, pbool silentfail);
 extern pbool type_inlinefunction;
 QCC_type_t *QCC_TypeForName(char *name);
 QCC_type_t *QCC_PR_ParseFunctionType (int newtype, QCC_type_t *returntype);
-QCC_type_t *QCC_PR_ParseFunctionTypeReacc (int newtype, QCC_type_t *returntype);
 char *QCC_PR_ParseName (void);
 CompilerConstant_t *QCC_PR_DefineName(char *name);
 
@@ -627,6 +639,8 @@ enum {
 	WARN_MISSINGOPTIONAL,
     WARN_IMPLICITDECLARATION,
     WARN_DEPRECATEDTERNARY,
+    WARN_DEPRECATEDLOCAL,
+    WARN_DEPRECATEDFUNCTIONSTYLE,
 
 	ERR_PARSEERRORS,	//caused by qcc_pr_parseerror being called.
 
@@ -725,6 +739,7 @@ enum {
     ERR_DEFAULTCASEREQUIRED,
     ERR_VOIDBLOCKEXPRESSION,
     ERR_TOOMANYVECTORELEMENTS,
+    ERR_UNRESOLVEDTYPE,
 	ERR_WERROR,
 
 	WARN_MAX

@@ -42,15 +42,15 @@ int numCompilerConstants;
 extern pbool expandedemptymacro;
 
 
-char	*pr_punctuation[] =
+char *pr_punctuation[] =
 // longer symbols must be before a shorter partial match
-{"&&", "||", "<=", ">=","==", "!=", "/=", "*=", "+=", "-=", "(+)", "(-)", "|=", "&~=", "++", "--", "->", "::", ";", ",", "!", "*", "/", "(", ")", "-", "+", "=", "[", "]", "{", "}", "...", "..", ".", "<<", "<", ">>", ">" , "?", "#" , "@", "&" , "|", "^", ":", NULL};
+{"&&", "||", "<=", ">=","==", "!=", "/=", "*=", "+=", "-=", "(+)", "(-)", "|=", "&~=", "++", "--", "->", "::", ";", ",", "!", "*", "/", "(", ")", "-", "+", "=", "[", "]", "{", "}", "...", "..", ".", "<<", "<", ">>", ">" , "?", "#" , "@", "&" , "|", "^", ":", "~", "%", NULL};
 
 char *pr_punctuationremap[] =	//a nice bit of evilness.
 //(+) -> |=
 //-> -> .
 //(-) -> &~=
-{"&&", "||", "<=", ">=","==", "!=", "/=", "*=", "+=", "-=", "|=",  "&~=", "|=", "&~=", "++", "--", ".", "::", ";", ",", "!", "*", "/", "(", ")", "-", "+", "=", "[", "]", "{", "}", "...", "..", ".", "<<", "<", ">>", ">" , "?", "#" , "@", "&" , "|", "^", ":", NULL};
+{"&&", "||", "<=", ">=","==", "!=", "/=", "*=", "+=", "-=", "|=",  "&~=", "|=", "&~=", "++", "--", ".", "::", ";", ",", "!", "*", "/", "(", ")", "-", "+", "=", "[", "]", "{", "}", "...", "..", ".", "<<", "<", ">>", ">" , "?", "#" , "@", "&" , "|", "^", ":", "~", "%", NULL};
 
 // simple types.  function types are dynamically allocated
 QCC_type_t	*type_void;// = {ev_void/*, &def_void*/};
@@ -64,6 +64,8 @@ QCC_type_t	*type_function;// = {ev_function/*, &def_function*/,NULL,&type_void};
 QCC_type_t	*type_pointer;// = {ev_pointer/*, &def_pointer*/};
 QCC_type_t	*type_integer;// = {ev_integer/*, &def_integer*/};
 QCC_type_t	*type_variant;// = {ev_integer/*, &def_integer*/};
+QCC_type_t  *type_undefined;
+QCC_type_t  *type_null;
 
 QCC_type_t	*type_floatfield;// = {ev_field/*, &def_field*/, NULL, &type_float};
 
@@ -838,7 +840,7 @@ pbool QCC_PR_Precompiler(void)
 			{
 	#define MAXSOURCEFILESLIST 8
 	extern char sourcefileslist[MAXSOURCEFILESLIST][1024];
-	//extern int currentsourcefile; // warning: unused variable âcurrentsourcefileâ
+	//extern int currentsourcefile; // warning: unused variable "currentsourcefile"
 	extern int numsourcefiles;
 
 				int i;
@@ -866,6 +868,8 @@ pbool QCC_PR_Precompiler(void)
 				}
 				else if (!QC_strcasecmp(msg, "KK7"))
 					qcc_targetformat = QCF_KK7;
+                else if (!QC_strcasecmp(msg, "DPRM"))
+                    qcc_targetformat = QCF_DPRM;
 				else if (!QC_strcasecmp(msg, "DP") || !QC_strcasecmp(msg, "DARKPLACES"))
 					qcc_targetformat = QCF_DARKPLACES;
 				else if (!QC_strcasecmp(msg, "FTEDEBUG"))
@@ -1319,8 +1323,6 @@ void QCC_PR_LexString (void)
 				continue;
 			}
 		}
-		else if (c == 0x7C && flag_acc)	//reacc support... reacc is strange.
-			c = '\n';
 		else
 			c |= texttype;
 
@@ -2648,15 +2650,6 @@ void QCC_PR_Lex (void)
 
 // if the first character is a valid identifier, parse until a non-id
 // character is reached
-	if ( c == '~' || c == '%')	//let's see which one we make into an operator first... possibly both...
-	{
-		QCC_PR_ParseWarning(0, "~ or %% prefixes to denote integers are deprecated. Please use a postfix of 'i'");
-		pr_file_p++;
-		pr_token_type = tt_immediate;
-		pr_immediate_type = type_integer;
-		pr_immediate._int = QCC_PR_LexInteger ();
-		return;
-	}
 	if ( c == '0' && pr_file_p[1] == 'x')
 	{
 		pr_token_type = tt_immediate;
@@ -3089,9 +3082,9 @@ char *TypeName(QCC_type_t *type)
 	static int op;
 	char *ret;
 
-
 	op++;
 	ret = buffer[op&1];
+
 	if (type->type == ev_field)
 	{
 		type = type->aux_type;
@@ -3334,83 +3327,7 @@ QCC_type_t *QCC_PR_ParseFunctionType (int newtype, QCC_type_t *returntype)
 		return ftype;
 	return QCC_PR_FindType (ftype);
 }
-QCC_type_t *QCC_PR_ParseFunctionTypeReacc (int newtype, QCC_type_t *returntype)
-{
-	QCC_type_t	*ftype, *ptype, *nptype;
-	char	*name;
-	char	argname[64];
-	int definenames = !recursivefunctiontype;
 
-	recursivefunctiontype++;
-
-	ftype = QCC_PR_NewType(type_function->name, ev_function);
-
-	ftype->aux_type = returntype;	// return type
-	ftype->num_parms = 0;
-	ptype = NULL;
-
-
-	if (!QCC_PR_CheckToken (")"))
-	{
-		if (QCC_PR_CheckToken ("..."))
-			ftype->num_parms = -1;	// variable args
-		else
-			do
-			{
-				if (ftype->num_parms>=MAX_PARMS+MAX_EXTRA_PARMS)
-					QCC_PR_ParseError(ERR_TOOMANYTOTALPARAMETERS, "Too many parameters. Sorry. (limit is %i)\n", MAX_PARMS+MAX_EXTRA_PARMS);
-
-				if (QCC_PR_CheckToken ("..."))
-				{
-					ftype->num_parms = (ftype->num_parms * -1) - 1;
-					break;
-				}
-
-				if (QCC_PR_CheckName("arg"))
-				{
-					sprintf(argname, "arg%i", ftype->num_parms);
-					name = argname;
-					nptype = QCC_PR_NewType("Variant", ev_variant);
-				}
-				else if (QCC_PR_CheckName("vect"))	//this can only be of vector sizes, so...
-				{
-					sprintf(argname, "arg%i", ftype->num_parms);
-					name = argname;
-					nptype = QCC_PR_NewType("Vector", ev_vector);
-				}
-				else
-				{
-					name = QCC_PR_ParseName();
-					QCC_PR_Expect(":");
-					nptype = QCC_PR_ParseType(true, false);
-				}
-
-				if (nptype->type == ev_void)
-					break;
-				if (!ptype)
-				{
-					ptype = nptype;
-					ftype->param = ptype;
-				}
-				else
-				{
-					ptype->next = nptype;
-					ptype = ptype->next;
-				}
-//				type->name = "FUNC PARAMETER";
-
-				if (definenames)
-					strcpy (pr_parm_names[ftype->num_parms], name);
-				ftype->num_parms++;
-			} while (QCC_PR_CheckToken (";"));
-
-		QCC_PR_Expect (")");
-	}
-	recursivefunctiontype--;
-	if (newtype)
-		return ftype;
-	return QCC_PR_FindType (ftype);
-}
 QCC_type_t *QCC_PR_PointerType (QCC_type_t *pointsto)
 {
 	QCC_type_t	*ptype, *e;
@@ -3425,6 +3342,7 @@ QCC_type_t *QCC_PR_PointerType (QCC_type_t *pointsto)
 	}
 	return e;
 }
+
 QCC_type_t *QCC_PR_FieldType (QCC_type_t *pointsto)
 {
 	QCC_type_t	*ptype;

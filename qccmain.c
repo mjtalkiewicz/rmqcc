@@ -230,6 +230,8 @@ compiler_flag_t compiler_flag[] = {
 	{&keyword_var,			defaultkeyword, "var",			"Keyword: var",			"Disables the 'var' keyword."},
 	{&keyword_vector,		defaultkeyword, "vector",		"Keyword: vector",		"Disables the 'vector' keyword."},
     {&keyword_inline,       defaultkeyword, "inline",       "Keyword: inline",      "Disables the 'inline' keyword."},
+    {&keyword_using,        defaultkeyword, "using",        "Keyword: using",       "Disables the 'using' keyword."},
+    {&keyword_operator,     defaultkeyword, "operator",     "Keyword: operator",    "Disables the 'operator' keyword."},
 
 
 	//options
@@ -239,9 +241,8 @@ compiler_flag_t compiler_flag[] = {
 	{&writeasm,				0,				"wasm",			"Dump Assembler",		"Writes out a qc.asm which contains all your functions but in assembler. This is a great way to look for bugs in rmqcc, but can also be used to see exactly what your functions turn into, and thus how to optimise statements better."},			//spit out a qc.asm file, containing an assembler dump of the ENTIRE progs. (Doesn't include initialisation of constants)
 	{&flag_ifstring,		FLAG_MIDCOMPILE,"ifstring",		"if(string) fix",		"Causes if(string) to behave identically to if(string!="") This is most useful with addons of course, but also has adverse effects with FRIK_FILE's fgets, where it becomes impossible to determin the end of the file. In such a case, you can still use asm {IF string 2;RETURN} to detect eof and leave the function."},		//correction for if(string) no-ifstring to get the standard behaviour.
 	{&flag_iffloat,			FLAG_MIDCOMPILE,"iffloat","if(-0.0) fix","Fixes certain floating point logic."},
-	{&flag_acc,				0,				"acc",			"Reacc support",		"Reacc is a pascall like compiler. It was released before the Quake source was released. This flag has a few effects. It sorts all qc files in the current directory into alphabetical order to compile them. It also allows Reacc global/field distinctions, as well as allows ¦ as EOF. Whilst case insensativity and lax type checking are supported by reacc, they are seperate compiler flags in rmqcc."},		//reacc like behaviour of src files.
-	{&flag_caseinsensative,	0,				"caseinsens",	"Case insensativity",	"Causes rmqcc to become case insensative whilst compiling names. It's generally not advised to use this as it compiles a little more slowly and provides little benefit. However, it is required for full reacc support."},	//symbols will be matched to an insensative case if the specified case doesn't exist. This should b usable for any mod
-	{&flag_laxcasts,		FLAG_MIDCOMPILE,"lax",			"Lax type checks",		"Disables many errors (generating warnings instead) when function calls or operations refer to two normally incompatible types. This is required for reacc support, and can also allow certain (evil) mods to compile that were originally written for frikqcc."},		//Allow lax casting. This'll produce loadsa warnings of course. But allows compilation of certain dodgy code.
+	{&flag_caseinsensative,	0,				"caseinsens",	"Case insensativity",	"Causes rmqcc to become case insensative whilst compiling names. It's generally not advised to use this as it compiles a little more slowly and provides little benefit."},	//symbols will be matched to an insensative case if the specified case doesn't exist. This should b usable for any mod
+	{&flag_laxcasts,		FLAG_MIDCOMPILE,"lax",			"Lax type checks",		"Disables many errors (generating warnings instead) when function calls or operations refer to two normally incompatible types. Can allow certain (evil) mods to compile that were originally written for frikqcc."},		//Allow lax casting. This'll produce loadsa warnings of course. But allows compilation of certain dodgy code.
 	{&flag_hashonly,		FLAG_MIDCOMPILE,"hashonly",		"Hash-only constants",	"Allows use of only #constant for precompiler constants, allows certain preqcc using mods to compile"},
 	{&opt_logicops,			FLAG_MIDCOMPILE,"lo",			"Logic ops",			"This changes the behaviour of your code. It generates additional if operations to early-out in if statements. With this flag, the line if (0 && somefunction()) will never call the function. It can thus be considered an optimisation. However, due to the change of behaviour, it is not considered so by rmqcc. Note that due to inprecisions with floats, this flag can cause runaway loop errors within the player walk and run functions (without iffloat also enabled). This code is advised:\nplayer_stand1:\n    if (self.velocity_x || self.velocity_y)\nplayer_run\n    if (!(self.velocity_x || self.velocity_y))"},
 	{&flag_msvcstyle,		FLAG_MIDCOMPILE,"msvcstyle",	"MSVC-style errors",	"Generates warning and error messages in a format that msvc understands, to facilitate ide integration."},
@@ -271,6 +272,7 @@ struct {
 	{QCF_DARKPLACES,"darkplaces"},
 	{QCF_DARKPLACES,"dp"},
 	{QCF_QTEST,		"qtest"},
+    {QCF_DPRM,      "dprm"},
 	{0,				NULL}
 };
 
@@ -606,6 +608,7 @@ pbool QCC_WriteData (int crc)
 	switch (qcc_targetformat)
 	{
 	case QCF_HEXEN2:
+    case QCF_DPRM:
 	case QCF_STANDARD:
 		if (bodylessfuncs)
 			printf("Warning: There are some functions without bodies.\n");
@@ -622,7 +625,9 @@ pbool QCC_WriteData (int crc)
 		}
 		else
 		{
-			if (numpr_globals >= 32768)	//not much of a different format. Rewrite output to get it working on original executors?
+            if (qcc_targetformat == QCF_DPRM)
+                printf("DarkPlacesRM will be required\n");
+			else if (numpr_globals >= 32768)	//not much of a different format. Rewrite output to get it working on original executors?
 				printf("An enhanced executor will be required (FTE/QF/KK)\n");
 			else
 				printf("Progs should run on any Quake executor\n");
@@ -1258,6 +1263,7 @@ strofs = (strofs+3)&~3;
 		break;
 	case QCF_STANDARD:
 	case QCF_HEXEN2:	//urgh
+    case QCF_DPRM:
 		progs.version = PROG_VERSION;
 		break;
 	case QCF_DARKPLACES:
@@ -1621,6 +1627,17 @@ QCC_type_t *QCC_PR_NewType (char *name, int basictype)
 	return &qcc_typeinfo[numtypeinfos-1];
 }
 
+QCC_type_t *QCC_PR_TypeFromBasicType(etype_t basictype) {
+    int i;
+
+    for(i = 0; i < numtypeinfos; ++i)
+        if(qcc_typeinfo[i].type == basictype)
+            return qcc_typeinfo + i;
+
+    QCC_PR_ParseError(ERR_INTERNAL, "bad basictype %d", basictype);
+    return NULL;
+}
+
 /*
 ==============
 PR_BeginCompilation
@@ -1659,6 +1676,8 @@ void	QCC_PR_BeginCompilation (void *memory, int memsize)
 	type_pointer = QCC_PR_NewType("__pointer", ev_pointer);
 	type_integer = QCC_PR_NewType("__integer", ev_integer);
 	type_variant = QCC_PR_NewType("__variant", ev_variant);
+    type_undefined = QCC_PR_NewType("__undefined", ev_undefined);
+    type_null = QCC_PR_NewType("null_t", ev_null);
 
 	type_floatfield = QCC_PR_NewType("fieldfloat", ev_field);
 	type_floatfield->aux_type = type_float;
@@ -1882,8 +1901,6 @@ unsigned short QCC_PR_WriteProgdefs (char *filename)
 	QCC_def_t	*d;
 	int	f;
 	unsigned short		crc;
-	QCC_def_t *ld;
-//	int		c;
 
 	file[0] = '\0';
 
@@ -1917,7 +1934,6 @@ unsigned short QCC_PR_WriteProgdefs (char *filename)
 	ADD3(qcva("\tint\tpad[%i];\n", RESERVED_OFS));
 	for (d=pr.def_head.next ; d ; d=d->next)
 	{
-		ld = d;
 		if (!strcmp (d->name, "end_sys_globals"))
 			break;
 		if (d->ofs<RESERVED_OFS)
@@ -2754,6 +2770,8 @@ void QCC_SetDefaultProperties (void)
 		qcc_targetformat = QCF_FTE;
 	else if (QCC_CheckParm ("-dp"))
 		qcc_targetformat = QCF_DARKPLACES;
+    else if (QCC_CheckParm ("-dprm"))
+        qcc_targetformat = QCF_DPRM;
 	else
 		qcc_targetformat = QCF_STANDARD;
 
@@ -3107,50 +3125,42 @@ memset(pr_immediate_string, 0, sizeof(pr_immediate_string));
 
 	QCC_PR_BeginCompilation ((void *)qccHunkAlloc (0x100000), 0x100000);
 
-	if (flag_acc)
+	if (!numsourcefiles)
 	{
-		if (!QCC_FindQCFiles())
-			QCC_Error (ERR_COULDNTOPENFILE, "Couldn't open file for asm output.");
+		p = QCC_CheckParm ("-qc");
+		if (!p || p >= argc-1 || argv[p+1][0] == '-')
+			p = QCC_CheckParm ("-srcfile");
+		if (p && p < argc-1 )
+			sprintf (qccmprogsdat, "%s", argv[p+1]);
+		else
+		{	//look for a preprogs.src... :o)
+			sprintf (qccmprogsdat, "preprogs.src");
+			if (externs->FileSize(qccmprogsdat) <= 0)
+				sprintf (qccmprogsdat, "progs.src");
+		}
+
+		numsourcefiles = 0;
+		strcpy(sourcefileslist[numsourcefiles++], qccmprogsdat);
+		currentsourcefile = 0;
 	}
-	else
+	else if (currentsourcefile == numsourcefiles)
 	{
-		if (!numsourcefiles)
-		{
-			p = QCC_CheckParm ("-qc");
-			if (!p || p >= argc-1 || argv[p+1][0] == '-')
-				p = QCC_CheckParm ("-srcfile");
-			if (p && p < argc-1 )
-				sprintf (qccmprogsdat, "%s", argv[p+1]);
-			else
-			{	//look for a preprogs.src... :o)
-				sprintf (qccmprogsdat, "preprogs.src");
-				if (externs->FileSize(qccmprogsdat) <= 0)
-					sprintf (qccmprogsdat, "progs.src");
-			}
+		//no more.
+		qcc_compileactive = false;
+		numsourcefiles = 0;
+		currentsourcefile = 0;
+		return;
+	}
 
-			numsourcefiles = 0;
-			strcpy(sourcefileslist[numsourcefiles++], qccmprogsdat);
-			currentsourcefile = 0;
-		}
-		else if (currentsourcefile == numsourcefiles)
-		{
-			//no more.
-			qcc_compileactive = false;
-			numsourcefiles = 0;
-			currentsourcefile = 0;
-			return;
-		}
+	if (currentsourcefile)
+		printf("-------------------------------------\n");
 
-		if (currentsourcefile)
-			printf("-------------------------------------\n");
+	sprintf (qccmprogsdat, "%s%s", qccmsourcedir, sourcefileslist[currentsourcefile++]);
+	printf ("Source file: %s\n", qccmprogsdat);
 
-		sprintf (qccmprogsdat, "%s%s", qccmsourcedir, sourcefileslist[currentsourcefile++]);
-		printf ("Source file: %s\n", qccmprogsdat);
-
-		if (QCC_LoadFile (qccmprogsdat, (void *)&qccmsrc) == -1)
-		{
-			return;
-		}
+	if (QCC_LoadFile (qccmprogsdat, (void *)&qccmsrc) == -1)
+	{
+		return;
 	}
 
 #ifdef WRITEASM
